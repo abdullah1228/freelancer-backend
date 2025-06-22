@@ -26,7 +26,7 @@ DB_NAME = os.environ.get('DB_NAME', 'freelancerrr') # Default for local XAMPP/My
 # Setup CORS - Crucial for connecting your GitHub Pages frontend
 # Updated: Replaced placeholder with your likely GitHub Pages URL.
 # If your frontend repo name is different, adjust 'freelancer-frontend' accordingly.
-CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io/freelancer-frontend/", "http://127.0.0.1:5000"]}})
+CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io/freelancer-frontend/", "https://abdullah1228.github.io"]}})
 
 # Database Connection Pool
 # This is more efficient for web applications as it reuses connections.
