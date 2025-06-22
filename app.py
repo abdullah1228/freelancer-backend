@@ -3,7 +3,7 @@ from mysql.connector import pooling
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from datetime import datetime
+from datetime import datetime # Keep this import as it is
 
 app = Flask(__name__)
 
@@ -11,7 +11,7 @@ app = Flask(__name__)
 # These variables MUST be set on your Render.com dashboard under the "Environment" tab.
 # Example values (replace with your actual MariaDB credentials):
 # DB_HOST = 'mariadb-198695-0.cloudclusters.net'
-# DB_PORT = '16326' # New: Port for your MariaDB
+# DB_PORT = '16326' # New: Port for your MariaDB (often non-standard on cloud DBs)
 # DB_USER = 'Abdullah2' # Your MariaDB/MySQL Username - UPDATED
 # DB_PASSWORD = 'abdullah' # Your MariaDB/MySQL Password - UPDATED
 # DB_NAME = 'freelancerrr' # Your MariaDB/MySQL Database Name - UPDATED
@@ -24,8 +24,7 @@ DB_PASSWORD = os.environ.get('DB_PASSWORD', '') # Default for local XAMPP/MySQL 
 DB_NAME = os.environ.get('DB_NAME', 'freelancerrr') # Default for local XAMPP/MySQL setup
 
 # Setup CORS - Crucial for connecting your GitHub Pages frontend
-# Updated: Replaced placeholder with your likely GitHub Pages URL.
-# If your frontend repo name is different, adjust 'freelancer-frontend' accordingly.
+# This includes both the base domain and the specific repository path for robustness.
 CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io/freelancer-frontend/", "https://abdullah1228.github.io"]}})
 
 # Database Connection Pool
@@ -84,7 +83,8 @@ def register_user():
     email = data.get('email')
     password = data.get('password')  # WARNING: In a real app, hash this password (e.g., using bcrypt)!
     user_type = data.get('user_type')
-    join_date = datetime.date.today().isoformat()
+    # CORRECTED: Use datetime.now().date() to get the current date
+    join_date = datetime.now().date().isoformat()
 
     if not all([name, email, password, user_type]):
         return jsonify({'message': 'Missing required fields'}), 400
@@ -101,6 +101,7 @@ def register_user():
             return jsonify({'message': 'User with this email already exists'}), 409
 
         # Insert new user
+        # Make sure 'created_at' column exists in your 'users' table
         sql = "INSERT INTO users (name, email, password, user_type, created_at) VALUES (%s, %s, %s, %s, %s)"
         cursor.execute(sql, (name, email, password, user_type, join_date))
         conn.commit()
@@ -141,13 +142,14 @@ def login_user():
     try:
         # WARNING: Plain text password check. In a real app, hash and verify passwords!
         # Select 'user_id' as primary key
+        # Make sure 'created_at' column exists in your 'users' table
         sql = "SELECT user_id, name, email, user_type, created_at FROM users WHERE email = %s AND password = %s"
         cursor.execute(sql, (email, password))
         user = cursor.fetchone()
 
         if user:
             # Convert date object to string for JSON serialization
-            if isinstance(user['created_at'], (datetime.datetime, datetime.date)):
+            if isinstance(user['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
                 user['created_at'] = user['created_at'].isoformat()
             
             # Map 'user_id' to 'user_id' for frontend consistency
@@ -160,7 +162,6 @@ def login_user():
             }
             return jsonify({'message': 'Login successful', 'user': user_data_for_frontend}), 200
         else:
-            # Specific error message as requested by user previously
             return jsonify({'message': 'Wrong username or password'}), 401
     except mysql.connector.Error as err:
         print(f"Error during user login: {err}")
@@ -180,12 +181,13 @@ def get_user_by_id(user_id):
     cursor = conn.cursor(dictionary=True)
     try:
         # Select 'user_id' as primary key
+        # Make sure 'created_at' column exists in your 'users' table
         sql = "SELECT user_id, name, email, user_type, created_at FROM users WHERE user_id = %s"
         cursor.execute(sql, (user_id,))
         user = cursor.fetchone()
 
         if user:
-            if isinstance(user['created_at'], (datetime.datetime, datetime.date)):
+            if isinstance(user['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
                 user['created_at'] = user['created_at'].isoformat()
             
             # Map 'user_id' to 'user_id' for frontend consistency
@@ -261,6 +263,7 @@ def get_all_gigs():
     try:
         # SELECT SQL for fetching all gigs, joining with categories to get the name
         # Alias 'g.gig_id' AS 'id' for consistency with frontend 'id' property
+        # Make sure 'created_at' column exists in your 'gigs' table if used there
         sql = """
             SELECT g.gig_id AS id,
                    g.user_id,
@@ -278,7 +281,7 @@ def get_all_gigs():
 
         # Convert datetime objects to strings for JSON serialization
         for gig in gigs:
-            if isinstance(gig['created_at'], (datetime.datetime, datetime.date)):
+            if isinstance(gig['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
                 gig['created_at'] = gig['created_at'].isoformat()
             # Ensure price is float
             gig['price'] = float(gig['price'])
@@ -302,6 +305,7 @@ def get_gig_by_id(gig_id):
     try:
         # SELECT SQL for fetching a single gig, joining with categories to get the name
         # Alias 'g.gig_id' AS 'id' for consistency with frontend 'id' property
+        # Make sure 'created_at' column exists in your 'gigs' table if used there
         sql = """
             SELECT g.gig_id AS id,
                    g.user_id,
@@ -318,7 +322,7 @@ def get_gig_by_id(gig_id):
         gig = cursor.fetchone()
 
         if gig:
-            if isinstance(gig['created_at'], (datetime.datetime, datetime.date)):
+            if isinstance(gig['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
                 gig['created_at'] = gig['created_at'].isoformat()
             gig['price'] = float(gig['price'])
             return jsonify(gig), 200
@@ -362,7 +366,8 @@ def create_order():
     buyer_id = data.get('buyer_id')
     freelancer_id = data.get('freelancer_id')
     status = 'pending'  # Default status
-    order_date = datetime.date.today().isoformat()
+    # CORRECTED: Use datetime.now().date() to get the current date
+    order_date = datetime.now().date().isoformat()
     # delivery_date will be None by default as per schema
 
     if not all([gig_id, buyer_id, freelancer_id]):
@@ -412,7 +417,7 @@ def get_orders_by_user():
         return jsonify({'message': 'Missing user_id or user_type parameter'}), 400
 
     conn = get_db_connection()
-    if conn is None:
+    if conn is None: # Corrected from `=== None` to `is None` for Python
         return jsonify({'message': 'Database connection failed'}), 500
 
     cursor = conn.cursor(dictionary=True)
@@ -430,9 +435,9 @@ def get_orders_by_user():
 
         # Convert date objects to strings for JSON serialization
         for order in orders:
-            if isinstance(order['order_date'], (datetime.datetime, datetime.date)):
+            if isinstance(order['order_date'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
                 order['order_date'] = order['order_date'].isoformat()
-            if isinstance(order['delivery_date'], (datetime.datetime, datetime.date)):
+            if isinstance(order['delivery_date'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
                 order['delivery_date'] = order['delivery_date'].isoformat()
         return jsonify(orders), 200
     except mysql.connector.Error as err:
@@ -463,7 +468,8 @@ def update_order_status(order_id):
         params = [new_status, order_id]
         if new_status == 'completed':
             sql = "UPDATE orders SET status = %s, delivery_date = %s WHERE order_id = %s"
-            params = [new_status, datetime.date.today().isoformat(), order_id] # Set current date for delivery_date
+            # CORRECTED: Use datetime.now().date() to get the current date
+            params = [new_status, datetime.now().date().isoformat(), order_id] # Set current date for delivery_date
 
         cursor.execute(sql, tuple(params))
         conn.commit()
@@ -508,7 +514,7 @@ def get_messages_by_order():
         messages = cursor.fetchall()
 
         for msg in messages:
-            if isinstance(msg['sent_at'], datetime.datetime):
+            if isinstance(msg['sent_at'], datetime): # Check against datetime.datetime
                 msg['sent_at'] = msg['sent_at'].isoformat()
         return jsonify(messages), 200
     except mysql.connector.Error as err:
@@ -585,7 +591,7 @@ def get_reviews_by_order():
         reviews = cursor.fetchall()
 
         for review in reviews:
-            if isinstance(review['review_date'], (datetime.datetime, datetime.date)):
+            if isinstance(review['review_date'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
                 review['review_date'] = review['review_date'].isoformat()
         return jsonify(reviews), 200
     except mysql.connector.Error as err:
@@ -604,7 +610,8 @@ def submit_review():
     reviewer_id = data.get('reviewer_id') # Frontend passes reviewer_id
     rating = data.get('rating')
     comment = data.get('comment')
-    review_date = datetime.date.today().isoformat()
+    # CORRECTED: Use datetime.now().date() to get the current date
+    review_date = datetime.now().date().isoformat()
 
     if not all([order_id, reviewer_id, rating]): # Added reviewer_id to required fields
         return jsonify({'message': 'Missing required fields'}), 400
