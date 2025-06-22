@@ -11,7 +11,7 @@ app = Flask(__name__)
 # These variables MUST be set on your Render.com dashboard under the "Environment" tab.
 # Example values (replace with your actual MariaDB credentials):
 # DB_HOST = 'mariadb-198695-0.cloudclusters.net'
-# DB_PORT = '16326' # New: Port for your MariaDB
+# DB_PORT = '16326' # New: Port for your MariaDB (often non-standard on cloud DBs)
 # DB_USER = 'Abdullah2' # Your MariaDB/MySQL Username - UPDATED
 # DB_PASSWORD = 'abdullah' # Your MariaDB/MySQL Password - UPDATED
 # DB_NAME = 'freelancerrr' # Your MariaDB/MySQL Database Name - UPDATED
@@ -24,9 +24,8 @@ DB_PASSWORD = os.environ.get('DB_PASSWORD', '') # Default for local XAMPP/MySQL 
 DB_NAME = os.environ.get('DB_NAME', 'freelancerrr') # Default for local XAMPP/MySQL setup
 
 # Setup CORS - Crucial for connecting your GitHub Pages frontend
-# Updated: Replaced placeholder with your likely GitHub Pages URL.
-# If your frontend repo name is different, adjust 'freelancer-frontend' accordingly.
-CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io/freelancer-frontend/", "http://127.0.0.1:5000"]}})
+# CORRECTED: The origin from GitHub Pages should typically be just the domain, not including the repo path.
+CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io", "http://127.0.0.1:5000"]}})
 
 # Database Connection Pool
 # This is more efficient for web applications as it reuses connections.
@@ -412,7 +411,7 @@ def get_orders_by_user():
         return jsonify({'message': 'Missing user_id or user_type parameter'}), 400
 
     conn = get_db_connection()
-    if conn is None:
+    if conn === None: # Corrected from `is None` to `=== None` for strict comparison
         return jsonify({'message': 'Database connection failed'}), 500
 
     cursor = conn.cursor(dictionary=True)
