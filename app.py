@@ -669,23 +669,3 @@ def test_db_connection():
 if __name__ == '__main__':
     # When deploying, Render will use gunicorn, so this block runs for local development only
     app.run(debug=True, port=5000)
-```You're getting a "URL not found" or 404 error, even after your service shows as "live". This often means the Flask application itself isn't successfully starting or routing requests properly, or that the URL you're hitting isn't the correct endpoint.
-
-To help diagnose this, I've added a very simple root endpoint (`/`) to your `app.py` code in the `flask-backend-app` Canvas.
-
-**Here are the steps you should take now:**
-
-1.  **Update Your Local `app.py`:** Replace the content of your local `app.py` file with the entire code block from the `flask-backend-app` Canvas I just provided.
-2.  **Commit and Push to GitHub:**
-    ```bash
-    git add .
-    git commit -m "Add root / endpoint for deployment testing"
-    git push origin main
-    ```
-3.  **Trigger a Redeploy on Render.com:** Go to your Render dashboard, navigate to your Flask service, and initiate a manual redeploy.
-4.  **Test the Root URL:** Once the service is live again, open your browser and go *only* to your Render.com public URL (e.g., `https://your-service-name.onrender.com/`).
-
-**What to look for:**
-
-* **If you see "Hello from Freelancerrr Backend!":** This is good! It means your Flask application is running and serving requests. The 404 for `/api/test_db` might then indicate an issue with how you're constructing the full API URL, or a very subtle routing problem within the API endpoints. We can then proceed to re-verify the `/api/test_db` URL.
-* **If you still get a "404 Not Found" or a generic Render error page:** This means your Flask application is still not correctly starting or exposing its routes. In this case, we'd need to look closer at the Render logs during deployment, and potentially your `Procfile` or `requirements.txt` to ensure everything is set up for Gunicorn correct
