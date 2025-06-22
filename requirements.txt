@@ -1,0 +1,4 @@
+Flask==2.3.3
+Flask-Cors==4.0.0
+mysql-connector-python==8.0.33
+gunicorn # Add gunicorn for production server
