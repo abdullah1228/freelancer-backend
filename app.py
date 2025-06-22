@@ -3,7 +3,7 @@ from mysql.connector import pooling
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from datetime import datetime # Keep this import as it is
+from datetime import datetime, date # CORRECTED: Import 'date' explicitly
 
 app = Flask(__name__)
 
@@ -83,7 +83,7 @@ def register_user():
     email = data.get('email')
     password = data.get('password')  # WARNING: In a real app, hash this password (e.g., using bcrypt)!
     user_type = data.get('user_type')
-    # CORRECTED: Use datetime.now().date() to get the current date
+    # Use datetime.now().date() to get the current date
     join_date = datetime.now().date().isoformat()
 
     if not all([name, email, password, user_type]):
@@ -149,7 +149,7 @@ def login_user():
 
         if user:
             # Convert date object to string for JSON serialization
-            if isinstance(user['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
+            if isinstance(user['created_at'], (datetime, date)): # CORRECTED: Use 'date'
                 user['created_at'] = user['created_at'].isoformat()
             
             # Map 'user_id' to 'user_id' for frontend consistency
@@ -187,7 +187,7 @@ def get_user_by_id(user_id):
         user = cursor.fetchone()
 
         if user:
-            if isinstance(user['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
+            if isinstance(user['created_at'], (datetime, date)): # CORRECTED: Use 'date'
                 user['created_at'] = user['created_at'].isoformat()
             
             # Map 'user_id' to 'user_id' for frontend consistency
@@ -281,7 +281,7 @@ def get_all_gigs():
 
         # Convert datetime objects to strings for JSON serialization
         for gig in gigs:
-            if isinstance(gig['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
+            if isinstance(gig['created_at'], (datetime, date)): # CORRECTED: Use 'date'
                 gig['created_at'] = gig['created_at'].isoformat()
             # Ensure price is float
             gig['price'] = float(gig['price'])
@@ -322,7 +322,7 @@ def get_gig_by_id(gig_id):
         gig = cursor.fetchone()
 
         if gig:
-            if isinstance(gig['created_at'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
+            if isinstance(gig['created_at'], (datetime, date)): # CORRECTED: Use 'date'
                 gig['created_at'] = gig['created_at'].isoformat()
             gig['price'] = float(gig['price'])
             return jsonify(gig), 200
@@ -366,7 +366,7 @@ def create_order():
     buyer_id = data.get('buyer_id')
     freelancer_id = data.get('freelancer_id')
     status = 'pending'  # Default status
-    # CORRECTED: Use datetime.now().date() to get the current date
+    # Use datetime.now().date() to get the current date
     order_date = datetime.now().date().isoformat()
     # delivery_date will be None by default as per schema
 
@@ -435,10 +435,14 @@ def get_orders_by_user():
 
         # Convert date objects to strings for JSON serialization
         for order in orders:
-            if isinstance(order['order_date'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
+            # The 'if isinstance' check ensures we only try to call .isoformat() if it's a date/datetime object
+            if isinstance(order['order_date'], (datetime, date)): # CORRECTED: Use 'date'
                 order['order_date'] = order['order_date'].isoformat()
-            if isinstance(order['delivery_date'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
+            # delivery_date can be NULL/None, so handle it carefully
+            if order['delivery_date'] and isinstance(order['delivery_date'], (datetime, date)): # CORRECTED: Use 'date'
                 order['delivery_date'] = order['delivery_date'].isoformat()
+            else:
+                order['delivery_date'] = None # Ensure it's explicitly None if it was not a date/datetime
         return jsonify(orders), 200
     except mysql.connector.Error as err:
         print(f"Error fetching orders: {err}")
@@ -468,7 +472,7 @@ def update_order_status(order_id):
         params = [new_status, order_id]
         if new_status == 'completed':
             sql = "UPDATE orders SET status = %s, delivery_date = %s WHERE order_id = %s"
-            # CORRECTED: Use datetime.now().date() to get the current date
+            # Use datetime.now().date() to get the current date
             params = [new_status, datetime.now().date().isoformat(), order_id] # Set current date for delivery_date
 
         cursor.execute(sql, tuple(params))
@@ -514,7 +518,7 @@ def get_messages_by_order():
         messages = cursor.fetchall()
 
         for msg in messages:
-            if isinstance(msg['sent_at'], datetime): # Check against datetime.datetime
+            if isinstance(msg['sent_at'], datetime): # This check is fine as 'sent_at' is likely DATETIME
                 msg['sent_at'] = msg['sent_at'].isoformat()
         return jsonify(messages), 200
     except mysql.connector.Error as err:
@@ -591,7 +595,7 @@ def get_reviews_by_order():
         reviews = cursor.fetchall()
 
         for review in reviews:
-            if isinstance(review['review_date'], (datetime, datetime.date)): # Check against datetime.datetime and datetime.date
+            if isinstance(review['review_date'], (datetime, date)): # CORRECTED: Use 'date'
                 review['review_date'] = review['review_date'].isoformat()
         return jsonify(reviews), 200
     except mysql.connector.Error as err:
@@ -610,7 +614,7 @@ def submit_review():
     reviewer_id = data.get('reviewer_id') # Frontend passes reviewer_id
     rating = data.get('rating')
     comment = data.get('comment')
-    # CORRECTED: Use datetime.now().date() to get the current date
+    # Use datetime.now().date() to get the current date
     review_date = datetime.now().date().isoformat()
 
     if not all([order_id, reviewer_id, rating]): # Added reviewer_id to required fields
