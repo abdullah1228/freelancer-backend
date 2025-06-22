@@ -9,14 +9,16 @@ app = Flask(__name__)
 
 # IMPORTANT: Database Configuration using Environment Variables
 # These variables MUST be set on your Render.com dashboard under the "Environment" tab.
-# Example values (replace with your actual InfinityFree credentials):
-# DB_HOST = 'sql305.infinityfree.com'
-# DB_USER = 'if0_39291767'
-# DB_PASSWORD = 'Abdullahcom123'
-# DB_NAME = 'if0_39291767_freelancerrr' # Ensure this is your full database name from InfinityFree
+# Example values (replace with your actual MariaDB credentials):
+# DB_HOST = 'mariadb-198695-0.cloudclusters.net'
+# DB_PORT = '16326' # New: Port for your MariaDB
+# DB_USER = 'Abdullah2' # Your MariaDB/MySQL Username - UPDATED
+# DB_PASSWORD = 'abdullah' # Your MariaDB/MySQL Password - UPDATED
+# DB_NAME = 'freelancerrr' # Your MariaDB/MySQL Database Name - UPDATED
 
 # Get database credentials from environment variables, with fallbacks for local development
 DB_HOST = os.environ.get('DB_HOST', 'localhost')
+DB_PORT = int(os.environ.get('DB_PORT', 3306)) # New: Convert port to integer
 DB_USER = os.environ.get('DB_USER', 'root') # Default for local XAMPP/MySQL setup
 DB_PASSWORD = os.environ.get('DB_PASSWORD', '') # Default for local XAMPP/MySQL setup
 DB_NAME = os.environ.get('DB_NAME', 'freelancerrr') # Default for local XAMPP/MySQL setup
@@ -33,6 +35,7 @@ try:
         pool_name="freelancerrr_pool",
         pool_size=5, # Number of connections to keep open in the pool
         host=DB_HOST,
+        port=DB_PORT, # New: Pass the port
         user=DB_USER,
         password=DB_PASSWORD,
         database=DB_NAME
@@ -56,6 +59,7 @@ def get_db_connection():
                 pool_name="freelancerrr_pool",
                 pool_size=5,
                 host=DB_HOST,
+                port=DB_PORT, # New: Pass the port here too
                 user=DB_USER,
                 password=DB_PASSWORD,
                 database=DB_NAME
