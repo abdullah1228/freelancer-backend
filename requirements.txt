@@ -2,3 +2,5 @@ Flask==2.3.3
 Flask-Cors==4.0.0
 mysql-connector-python==8.0.33
 gunicorn # Add gunicorn for production server
+pip install Flask-SocketIO eventlet redis # Or gevent instead of eventlet
+pip freeze > requirements.txt
