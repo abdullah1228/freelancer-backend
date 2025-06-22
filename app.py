@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 from datetime import datetime, date
-from flask_socketio import SocketIO, emit # NEW: Import SocketIO
+from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
 
@@ -28,14 +28,14 @@ DB_NAME = os.environ.get('DB_NAME', 'freelancerrr')
 # This includes both the base domain and the specific repository path for robustness.
 # Allow WebSocket origins explicitly for Flask-SocketIO
 CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io/freelancer-frontend/", "https://abdullah1228.github.io"]}},
-     supports_credentials=True) # Important for SocketIO and cookies/sessions
+     supports_credentials=True)
 
 # Initialize Flask-SocketIO
 # async_mode='gevent' or 'eventlet' is recommended for production.
 # For simplicity in Render deployment, we'll start with 'threading' if no explicit async library.
 # If you have Gunicorn config, ensure it's set up for eventlet/gevent workers.
 socketio = SocketIO(app, cors_allowed_origins=["https://abdullah1228.github.io", "https://abdullah1228.github.io/freelancer-frontend/"],
-                    message_queue=os.environ.get('REDIS_URL', 'redis://localhost:6379/0')) # Added message_queue for scaling
+                    message_queue=os.environ.get('REDIS_URL', 'redis://localhost:6379/0'))
 
 # Database Connection Pool
 try:
@@ -149,7 +149,7 @@ def login_user():
         if user:
             if isinstance(user['created_at'], (datetime, date)):
                 user['created_at'] = user['created_at'].isoformat()
-            
+
             user_data_for_frontend = {
                 "user_id": user['user_id'],
                 "name": user['name'],
@@ -184,7 +184,7 @@ def get_user_by_id(user_id):
         if user:
             if isinstance(user['created_at'], (datetime, date)):
                 user['created_at'] = user['created_at'].isoformat()
-            
+
             user_data_for_frontend = {
                 "user_id": user['user_id'],
                 "name": user['name'],
@@ -363,7 +363,7 @@ def create_order():
         cursor.execute("SELECT gig_id FROM gigs WHERE gig_id = %s", (gig_id,))
         if not cursor.fetchone():
             return jsonify({'message': 'Gig not found'}), 404
-        
+
         cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (buyer_id,))
         if not cursor.fetchone():
             return jsonify({'message': 'Buyer not found'}), 404
@@ -480,7 +480,7 @@ def get_messages_by_order():
                    order_id,
                    sender_id,
                    receiver_id,
-                   message_text AS message, # Alias message_text to 'message' for frontend
+                   message_text AS message,
                    sent_at
             FROM messages
             WHERE order_id = %s
@@ -508,7 +508,7 @@ def send_message():
     order_id = data.get('order_id')
     sender_id = data.get('sender_id')
     receiver_id = data.get('receiver_id')
-    message_text = data.get('message') # Frontend sends 'message'
+    message_text = data.get('message')
 
     if not all([order_id, sender_id, receiver_id, message_text]):
         return jsonify({'message': 'Missing required fields'}), 400
@@ -523,17 +523,15 @@ def send_message():
         cursor.execute(sql, (order_id, sender_id, receiver_id, message_text))
         conn.commit()
         message_id = cursor.lastrowid
-        
-        # NEW: Emit WebSocket event for the new message
-        # Emitting to a 'room' based on order_id ensures only relevant clients get the message
+
         socketio.emit('new_message', {
             'id': message_id,
             'order_id': order_id,
             'sender_id': sender_id,
             'receiver_id': receiver_id,
             'message': message_text,
-            'sent_at': datetime.now().isoformat() # Use current time for consistency
-        }, room=str(order_id)) # Room name must be a string
+            'sent_at': datetime.now().isoformat()
+        }, room=str(order_id))
 
         return jsonify({'message': 'Message sent successfully', 'message_id': message_id}), 201
     except mysql.connector.Error as err:
@@ -572,7 +570,7 @@ def get_reviews_by_order():
                 ORDER BY r.review_date DESC
             """
             cursor.execute(sql, (gig_id,))
-        
+
         reviews = cursor.fetchall()
 
         for review in reviews:
@@ -666,13 +664,11 @@ def test_disconnect():
 def on_join(data):
     order_id = data['order_id']
     from flask_socketio import join_room
-    join_room(str(order_id)) # Room names must be strings
+    join_room(str(order_id))
     print(f"Client joined room: {order_id}")
     emit('status', {'msg': f'Joined order room: {order_id}'})
 
 
 # --- Main execution block ---
 if __name__ == '__main__':
-    # Use socketio.run() instead of app.run() when using Flask-SocketIO
-    # Render will use gunicorn, so this block is primarily for local development
     socketio.run(app, debug=True, port=5000)
