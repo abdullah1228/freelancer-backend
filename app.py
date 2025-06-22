@@ -3,7 +3,8 @@ from mysql.connector import pooling
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from datetime import datetime, date # CORRECTED: Import 'date' explicitly
+from datetime import datetime, date
+from flask_socketio import SocketIO, emit # NEW: Import SocketIO
 
 app = Flask(__name__)
 
@@ -18,23 +19,31 @@ app = Flask(__name__)
 
 # Get database credentials from environment variables, with fallbacks for local development
 DB_HOST = os.environ.get('DB_HOST', 'localhost')
-DB_PORT = int(os.environ.get('DB_PORT', 3306)) # New: Convert port to integer
-DB_USER = os.environ.get('DB_USER', 'root') # Default for local XAMPP/MySQL setup
-DB_PASSWORD = os.environ.get('DB_PASSWORD', '') # Default for local XAMPP/MySQL setup
-DB_NAME = os.environ.get('DB_NAME', 'freelancerrr') # Default for local XAMPP/MySQL setup
+DB_PORT = int(os.environ.get('DB_PORT', 3306))
+DB_USER = os.environ.get('DB_USER', 'root')
+DB_PASSWORD = os.environ.get('DB_PASSWORD', '')
+DB_NAME = os.environ.get('DB_NAME', 'freelancerrr')
 
 # Setup CORS - Crucial for connecting your GitHub Pages frontend
 # This includes both the base domain and the specific repository path for robustness.
-CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io/freelancer-frontend/", "https://abdullah1228.github.io"]}})
+# Allow WebSocket origins explicitly for Flask-SocketIO
+CORS(app, resources={r"/api/*": {"origins": ["https://abdullah1228.github.io/freelancer-frontend/", "https://abdullah1228.github.io"]}},
+     supports_credentials=True) # Important for SocketIO and cookies/sessions
+
+# Initialize Flask-SocketIO
+# async_mode='gevent' or 'eventlet' is recommended for production.
+# For simplicity in Render deployment, we'll start with 'threading' if no explicit async library.
+# If you have Gunicorn config, ensure it's set up for eventlet/gevent workers.
+socketio = SocketIO(app, cors_allowed_origins=["https://abdullah1228.github.io", "https://abdullah1228.github.io/freelancer-frontend/"],
+                    message_queue=os.environ.get('REDIS_URL', 'redis://localhost:6379/0')) # Added message_queue for scaling
 
 # Database Connection Pool
-# This is more efficient for web applications as it reuses connections.
 try:
     db_pool = pooling.MySQLConnectionPool(
         pool_name="freelancerrr_pool",
-        pool_size=5, # Number of connections to keep open in the pool
+        pool_size=5,
         host=DB_HOST,
-        port=DB_PORT, # New: Pass the port
+        port=DB_PORT,
         user=DB_USER,
         password=DB_PASSWORD,
         database=DB_NAME
@@ -42,31 +51,28 @@ try:
     print("MySQL connection pool created successfully.")
 except mysql.connector.Error as err:
     print(f"Error creating MySQL connection pool: {err}")
-    # In a real application, you might want to handle this critical error more robustly (e.g., exit or retry)
 
 def get_db_connection():
-    """Gets a connection from the pool.
-    It will automatically create a new connection if the pool is exhausted or recreate the pool if it failed."""
-    global db_pool # Declare db_pool as global to modify it if needed
+    """Gets a connection from the pool."""
+    global db_pool
     try:
         return db_pool.get_connection()
     except mysql.connector.Error as err:
         print(f"Error getting connection from pool: {err}. Attempting to recreate pool...")
-        # Attempt to recreate the pool if there's an issue (e.g., connection lost)
         try:
             db_pool = pooling.MySQLConnectionPool(
                 pool_name="freelancerrr_pool",
                 pool_size=5,
                 host=DB_HOST,
-                port=DB_PORT, # New: Pass the port here too
+                port=DB_PORT,
                 user=DB_USER,
                 password=DB_PASSWORD,
                 database=DB_NAME
             )
-            return db_pool.get_connection() # Try getting a connection from the new pool
+            return db_pool.get_connection()
         except mysql.connector.Error as pool_err:
             print(f"Failed to recreate MySQL connection pool: {pool_err}")
-            return None # Return None if we still can't get a connection
+            return None
 
 # --- NEW: Simple Test Route for Root URL ---
 @app.route('/')
@@ -81,9 +87,8 @@ def register_user():
     data = request.json
     name = data.get('name')
     email = data.get('email')
-    password = data.get('password')  # WARNING: In a real app, hash this password (e.g., using bcrypt)!
+    password = data.get('password')
     user_type = data.get('user_type')
-    # Use datetime.now().date() to get the current date
     join_date = datetime.now().date().isoformat()
 
     if not all([name, email, password, user_type]):
@@ -93,26 +98,23 @@ def register_user():
     if conn is None:
         return jsonify({'message': 'Database connection failed'}), 500
 
-    cursor = conn.cursor(dictionary=True) # Use dictionary=True for easier key-value access
+    cursor = conn.cursor(dictionary=True)
     try:
-        # Check if email already exists, using 'user_id' as primary key
         cursor.execute("SELECT user_id FROM users WHERE email = %s", (email,))
         if cursor.fetchone():
             return jsonify({'message': 'User with this email already exists'}), 409
 
-        # Insert new user
-        # Make sure 'created_at' column exists in your 'users' table
         sql = "INSERT INTO users (name, email, password, user_type, created_at) VALUES (%s, %s, %s, %s, %s)"
         cursor.execute(sql, (name, email, password, user_type, join_date))
         conn.commit()
 
-        user_id = cursor.lastrowid # This gets the auto-incremented user_id
+        user_id = cursor.lastrowid
         new_user = {
-            "user_id": user_id, # Frontend expects 'user_id'
+            "user_id": user_id,
             "name": name,
             "email": email,
             "user_type": user_type,
-            "join_date": join_date # Keep 'join_date' for consistency with frontend expectation
+            "join_date": join_date
         }
         return jsonify({'message': 'User registered successfully', 'user': new_user}), 201
     except mysql.connector.Error as err:
@@ -140,25 +142,20 @@ def login_user():
 
     cursor = conn.cursor(dictionary=True)
     try:
-        # WARNING: Plain text password check. In a real app, hash and verify passwords!
-        # Select 'user_id' as primary key
-        # Make sure 'created_at' column exists in your 'users' table
         sql = "SELECT user_id, name, email, user_type, created_at FROM users WHERE email = %s AND password = %s"
         cursor.execute(sql, (email, password))
         user = cursor.fetchone()
 
         if user:
-            # Convert date object to string for JSON serialization
-            if isinstance(user['created_at'], (datetime, date)): # CORRECTED: Use 'date'
+            if isinstance(user['created_at'], (datetime, date)):
                 user['created_at'] = user['created_at'].isoformat()
             
-            # Map 'user_id' to 'user_id' for frontend consistency
             user_data_for_frontend = {
-                "user_id": user['user_id'], # Use 'user_id' from database result
+                "user_id": user['user_id'],
                 "name": user['name'],
                 "email": user['email'],
                 "user_type": user['user_type'],
-                "join_date": user['created_at'] # Use created_at as join_date for frontend
+                "join_date": user['created_at']
             }
             return jsonify({'message': 'Login successful', 'user': user_data_for_frontend}), 200
         else:
@@ -180,19 +177,16 @@ def get_user_by_id(user_id):
 
     cursor = conn.cursor(dictionary=True)
     try:
-        # Select 'user_id' as primary key
-        # Make sure 'created_at' column exists in your 'users' table
         sql = "SELECT user_id, name, email, user_type, created_at FROM users WHERE user_id = %s"
         cursor.execute(sql, (user_id,))
         user = cursor.fetchone()
 
         if user:
-            if isinstance(user['created_at'], (datetime, date)): # CORRECTED: Use 'date'
+            if isinstance(user['created_at'], (datetime, date)):
                 user['created_at'] = user['created_at'].isoformat()
             
-            # Map 'user_id' to 'user_id' for frontend consistency
             user_data_for_frontend = {
-                "user_id": user['user_id'], # Use 'user_id' from database result
+                "user_id": user['user_id'],
                 "name": user['name'],
                 "email": user['email'],
                 "user_type": user['user_type'],
@@ -216,7 +210,7 @@ def create_gig():
     user_id = data.get('user_id')
     title = data.get('title')
     description = data.get('description')
-    category_name = data.get('category')  # Frontend sends category name
+    category_name = data.get('category')
     price = data.get('price')
 
     if not all([user_id, title, description, category_name, price]):
@@ -226,21 +220,19 @@ def create_gig():
     if conn is None:
         return jsonify({'message': 'Database connection failed'}), 500
 
-    cursor = conn.cursor(dictionary=True) # Use dictionary cursor for all operations
+    cursor = conn.cursor(dictionary=True)
     try:
-        # Get category_id from category_name (assuming category_id is PK in categories)
         cursor.execute("SELECT category_id FROM categories WHERE name = %s", (category_name,))
         category_result = cursor.fetchone()
 
         if not category_result:
             return jsonify({'message': 'Invalid category provided. Category name not found.'}), 400
-        category_id = category_result['category_id'] # Access by key 'category_id'
+        category_id = category_result['category_id']
 
-        # Insert gig using 'gig_id' as primary key, and 'category_id' as foreign key
         sql = "INSERT INTO gigs (user_id, title, description, category_id, price) VALUES (%s, %s, %s, %s, %s)"
         cursor.execute(sql, (user_id, title, description, category_id, price))
         conn.commit()
-        gig_id = cursor.lastrowid # This gets the auto-incremented gig_id
+        gig_id = cursor.lastrowid
 
         return jsonify({'message': 'Gig created successfully', 'gig_id': gig_id}), 201
     except mysql.connector.Error as err:
@@ -261,29 +253,24 @@ def get_all_gigs():
 
     cursor = conn.cursor(dictionary=True)
     try:
-        # SELECT SQL for fetching all gigs, joining with categories to get the name
-        # Alias 'g.gig_id' AS 'id' for consistency with frontend 'id' property
-        # Make sure 'created_at' column exists in your 'gigs' table if used there
         sql = """
             SELECT g.gig_id AS id,
                    g.user_id,
                    g.title,
                    g.description,
-                   c.name AS category, -- Alias 'name' from categories to 'category'
+                   c.name AS category,
                    g.price,
                    g.created_at
             FROM gigs AS g
-            JOIN categories AS c ON g.category_id = c.category_id -- Join on category_id
+            JOIN categories AS c ON g.category_id = c.category_id
             ORDER BY g.created_at DESC
         """
         cursor.execute(sql)
         gigs = cursor.fetchall()
 
-        # Convert datetime objects to strings for JSON serialization
         for gig in gigs:
-            if isinstance(gig['created_at'], (datetime, date)): # CORRECTED: Use 'date'
+            if isinstance(gig['created_at'], (datetime, date)):
                 gig['created_at'] = gig['created_at'].isoformat()
-            # Ensure price is float
             gig['price'] = float(gig['price'])
         return jsonify(gigs), 200
     except mysql.connector.Error as err:
@@ -303,26 +290,23 @@ def get_gig_by_id(gig_id):
 
     cursor = conn.cursor(dictionary=True)
     try:
-        # SELECT SQL for fetching a single gig, joining with categories to get the name
-        # Alias 'g.gig_id' AS 'id' for consistency with frontend 'id' property
-        # Make sure 'created_at' column exists in your 'gigs' table if used there
         sql = """
             SELECT g.gig_id AS id,
                    g.user_id,
                    g.title,
                    g.description,
-                   c.name AS category, -- Alias 'name' from categories to 'category'
+                   c.name AS category,
                    g.price,
                    g.created_at
             FROM gigs AS g
-            JOIN categories AS c ON g.category_id = c.category_id -- Join on category_id
-            WHERE g.gig_id = %s -- Query by gig_id
+            JOIN categories AS c ON g.category_id = c.category_id
+            WHERE g.gig_id = %s
         """
         cursor.execute(sql, (gig_id,))
         gig = cursor.fetchone()
 
         if gig:
-            if isinstance(gig['created_at'], (datetime, date)): # CORRECTED: Use 'date'
+            if isinstance(gig['created_at'], (datetime, date)):
                 gig['created_at'] = gig['created_at'].isoformat()
             gig['price'] = float(gig['price'])
             return jsonify(gig), 200
@@ -345,7 +329,6 @@ def get_all_categories():
 
     cursor = conn.cursor(dictionary=True)
     try:
-        # Select 'category_id' as 'id' for frontend consistency
         sql = "SELECT category_id AS id, name FROM categories"
         cursor.execute(sql)
         categories = cursor.fetchall()
@@ -365,10 +348,8 @@ def create_order():
     gig_id = data.get('gig_id')
     buyer_id = data.get('buyer_id')
     freelancer_id = data.get('freelancer_id')
-    status = 'pending'  # Default status
-    # Use datetime.now().date() to get the current date
+    status = 'pending'
     order_date = datetime.now().date().isoformat()
-    # delivery_date will be None by default as per schema
 
     if not all([gig_id, buyer_id, freelancer_id]):
         return jsonify({'message': 'Missing required fields'}), 400
@@ -379,24 +360,22 @@ def create_order():
 
     cursor = conn.cursor()
     try:
-        # Check if gig, buyer, and freelancer exist before creating order
-        cursor.execute("SELECT gig_id FROM gigs WHERE gig_id = %s", (gig_id,)) # Check by gig_id
+        cursor.execute("SELECT gig_id FROM gigs WHERE gig_id = %s", (gig_id,))
         if not cursor.fetchone():
             return jsonify({'message': 'Gig not found'}), 404
         
-        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (buyer_id,)) # Check by user_id
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (buyer_id,))
         if not cursor.fetchone():
             return jsonify({'message': 'Buyer not found'}), 404
 
-        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (freelancer_id,)) # Check by user_id
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (freelancer_id,))
         if not cursor.fetchone():
             return jsonify({'message': 'Freelancer not found'}), 404
 
-        # Insert into orders table using 'order_id' as primary key
         sql = "INSERT INTO orders (gig_id, buyer_id, freelancer_id, status, order_date) VALUES (%s, %s, %s, %s, %s)"
         cursor.execute(sql, (gig_id, buyer_id, freelancer_id, status, order_date))
         conn.commit()
-        order_id = cursor.lastrowid # This gets the auto-incremented order_id
+        order_id = cursor.lastrowid
         return jsonify({'message': 'Order created successfully', 'order_id': order_id}), 201
     except mysql.connector.Error as err:
         conn.rollback()
@@ -417,12 +396,11 @@ def get_orders_by_user():
         return jsonify({'message': 'Missing user_id or user_type parameter'}), 400
 
     conn = get_db_connection()
-    if conn is None: # Corrected from `=== None` to `is None` for Python
+    if conn is None:
         return jsonify({'message': 'Database connection failed'}), 500
 
     cursor = conn.cursor(dictionary=True)
     try:
-        # Select 'order_id' as 'id' for frontend consistency
         if user_type == 'buyer':
             sql = "SELECT order_id AS id, gig_id, buyer_id, freelancer_id, status, order_date, delivery_date FROM orders WHERE buyer_id = %s ORDER BY order_date DESC"
         elif user_type == 'freelancer':
@@ -433,16 +411,13 @@ def get_orders_by_user():
         cursor.execute(sql, (user_id,))
         orders = cursor.fetchall()
 
-        # Convert date objects to strings for JSON serialization
         for order in orders:
-            # The 'if isinstance' check ensures we only try to call .isoformat() if it's a date/datetime object
-            if isinstance(order['order_date'], (datetime, date)): # CORRECTED: Use 'date'
+            if isinstance(order['order_date'], (datetime, date)):
                 order['order_date'] = order['order_date'].isoformat()
-            # delivery_date can be NULL/None, so handle it carefully
-            if order['delivery_date'] and isinstance(order['delivery_date'], (datetime, date)): # CORRECTED: Use 'date'
+            if order['delivery_date'] and isinstance(order['delivery_date'], (datetime, date)):
                 order['delivery_date'] = order['delivery_date'].isoformat()
             else:
-                order['delivery_date'] = None # Ensure it's explicitly None if it was not a date/datetime
+                order['delivery_date'] = None
         return jsonify(orders), 200
     except mysql.connector.Error as err:
         print(f"Error fetching orders: {err}")
@@ -467,13 +442,11 @@ def update_order_status(order_id):
 
     cursor = conn.cursor()
     try:
-        # Update by 'order_id'
         sql = "UPDATE orders SET status = %s WHERE order_id = %s"
         params = [new_status, order_id]
         if new_status == 'completed':
             sql = "UPDATE orders SET status = %s, delivery_date = %s WHERE order_id = %s"
-            # Use datetime.now().date() to get the current date
-            params = [new_status, datetime.now().date().isoformat(), order_id] # Set current date for delivery_date
+            params = [new_status, datetime.now().date().isoformat(), order_id]
 
         cursor.execute(sql, tuple(params))
         conn.commit()
@@ -502,7 +475,6 @@ def get_messages_by_order():
 
     cursor = conn.cursor(dictionary=True)
     try:
-        # Select 'message_id' as 'id' for frontend consistency
         sql = """
             SELECT message_id AS id,
                    order_id,
@@ -518,7 +490,7 @@ def get_messages_by_order():
         messages = cursor.fetchall()
 
         for msg in messages:
-            if isinstance(msg['sent_at'], datetime): # This check is fine as 'sent_at' is likely DATETIME
+            if isinstance(msg['sent_at'], datetime):
                 msg['sent_at'] = msg['sent_at'].isoformat()
         return jsonify(messages), 200
     except mysql.connector.Error as err:
@@ -550,7 +522,19 @@ def send_message():
         sql = "INSERT INTO messages (order_id, sender_id, receiver_id, message_text, sent_at) VALUES (%s, %s, %s, %s, NOW())"
         cursor.execute(sql, (order_id, sender_id, receiver_id, message_text))
         conn.commit()
-        message_id = cursor.lastrowid # This gets the auto-incremented message_id
+        message_id = cursor.lastrowid
+        
+        # NEW: Emit WebSocket event for the new message
+        # Emitting to a 'room' based on order_id ensures only relevant clients get the message
+        socketio.emit('new_message', {
+            'id': message_id,
+            'order_id': order_id,
+            'sender_id': sender_id,
+            'receiver_id': receiver_id,
+            'message': message_text,
+            'sent_at': datetime.now().isoformat() # Use current time for consistency
+        }, room=str(order_id)) # Room name must be a string
+
         return jsonify({'message': 'Message sent successfully', 'message_id': message_id}), 201
     except mysql.connector.Error as err:
         conn.rollback()
@@ -565,9 +549,9 @@ def send_message():
 @app.route('/api/reviews', methods=['GET'])
 def get_reviews_by_order():
     order_id = request.args.get('order_id', type=int)
-    gig_id = request.args.get('gig_id', type=int) # New parameter for fetching reviews by gig
+    gig_id = request.args.get('gig_id', type=int)
 
-    if not order_id and not gig_id: # Either order_id or gig_id is required
+    if not order_id and not gig_id:
         return jsonify({'message': 'Missing order_id or gig_id parameter'}), 400
 
     conn = get_db_connection()
@@ -577,17 +561,14 @@ def get_reviews_by_order():
     cursor = conn.cursor(dictionary=True)
     try:
         if order_id:
-            # Select 'review_id' as 'id' for frontend consistency
             sql = "SELECT review_id AS id, order_id, reviewer_id, rating, comment, review_date FROM reviews WHERE order_id = %s ORDER BY review_date DESC"
             cursor.execute(sql, (order_id,))
         elif gig_id:
-            # Join with orders table to filter by gig_id
-            # Select 'r.review_id' as 'id' for frontend consistency
             sql = """
                 SELECT r.review_id AS id, r.order_id, r.reviewer_id, r.rating, r.comment, r.review_date
                 FROM reviews AS r
-                JOIN orders AS o ON r.order_id = o.order_id -- Join on order_id
-                WHERE o.gig_id = %s -- Filter by gig_id
+                JOIN orders AS o ON r.order_id = o.order_id
+                WHERE o.gig_id = %s
                 ORDER BY r.review_date DESC
             """
             cursor.execute(sql, (gig_id,))
@@ -595,7 +576,7 @@ def get_reviews_by_order():
         reviews = cursor.fetchall()
 
         for review in reviews:
-            if isinstance(review['review_date'], (datetime, date)): # CORRECTED: Use 'date'
+            if isinstance(review['review_date'], (datetime, date)):
                 review['review_date'] = review['review_date'].isoformat()
         return jsonify(reviews), 200
     except mysql.connector.Error as err:
@@ -611,13 +592,12 @@ def get_reviews_by_order():
 def submit_review():
     data = request.json
     order_id = data.get('order_id')
-    reviewer_id = data.get('reviewer_id') # Frontend passes reviewer_id
+    reviewer_id = data.get('reviewer_id')
     rating = data.get('rating')
     comment = data.get('comment')
-    # Use datetime.now().date() to get the current date
     review_date = datetime.now().date().isoformat()
 
-    if not all([order_id, reviewer_id, rating]): # Added reviewer_id to required fields
+    if not all([order_id, reviewer_id, rating]):
         return jsonify({'message': 'Missing required fields'}), 400
     if not (1 <= rating <= 5):
         return jsonify({'message': 'Rating must be between 1 and 5'}), 400
@@ -628,18 +608,15 @@ def submit_review():
 
     cursor = conn.cursor()
     try:
-        # Check if reviewer has already reviewed this specific order
-        # Using 'review_id' as primary key name for review
         sql_check = "SELECT review_id FROM reviews WHERE order_id = %s AND reviewer_id = %s"
         cursor.execute(sql_check, (order_id, reviewer_id))
         if cursor.fetchone():
             return jsonify({'message': 'You have already reviewed this order'}), 409
 
-        # Insert review using 'review_id' as primary key name
         sql_insert = "INSERT INTO reviews (order_id, reviewer_id, rating, comment, review_date) VALUES (%s, %s, %s, %s, %s)"
         cursor.execute(sql_insert, (order_id, reviewer_id, rating, comment, review_date))
         conn.commit()
-        review_id = cursor.lastrowid # This gets the auto-incremented review_id
+        review_id = cursor.lastrowid
         return jsonify({'message': 'Review submitted successfully', 'review_id': review_id}), 201
     except mysql.connector.Error as err:
         conn.rollback()
@@ -659,8 +636,8 @@ def test_db_connection():
         if conn is None:
             return jsonify({'status': 'error', 'message': 'Failed to connect to database. Check environment variables and database availability.'}), 500
         cursor = conn.cursor()
-        # This count should work regardless of primary key name
-        cursor.execute("SELECT COUNT(*) FROM users")
+        sql = "SELECT COUNT(*) FROM users"
+        cursor.execute(sql)
         user_count = cursor.fetchone()[0]
         cursor.close()
         return jsonify({
@@ -676,7 +653,26 @@ def test_db_connection():
             conn.close()
 
 
+# --- SocketIO Event Handlers ---
+@socketio.on('connect')
+def test_connect():
+    print('Client connected')
+
+@socketio.on('disconnect')
+def test_disconnect():
+    print('Client disconnected')
+
+@socketio.on('join_order_room')
+def on_join(data):
+    order_id = data['order_id']
+    from flask_socketio import join_room
+    join_room(str(order_id)) # Room names must be strings
+    print(f"Client joined room: {order_id}")
+    emit('status', {'msg': f'Joined order room: {order_id}'})
+
+
 # --- Main execution block ---
 if __name__ == '__main__':
-    # When deploying, Render will use gunicorn, so this block runs for local development only
-    app.run(debug=True, port=5000)
+    # Use socketio.run() instead of app.run() when using Flask-SocketIO
+    # Render will use gunicorn, so this block is primarily for local development
+    socketio.run(app, debug=True, port=5000)
